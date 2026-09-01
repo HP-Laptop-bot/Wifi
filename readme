@@ -1,0 +1,174 @@
+# PhantomSniff — Automated WiFi Penetration Testing Framework
+
+**Version 1.0.0** · Python 3.8+ · Single-file, modular, low-resource
+
+PhantomSniff is an orchestrator around the standard open-source wireless auditing toolchain (aircrack-ng, hcxtools, reaver/pixiewps, mdk4, hashcat, hostapd + dnsmasq, scapy). It automates recon → attack → cracking → reporting end-to-end.
+
+---
+
+## ⚠️ Legal Notice — Authorized Use Only
+
+Attacking wireless networks **without the explicit written permission of the owner is illegal** in most jurisdictions (e.g., CFAA in the US, Computer Misuse Act in the UK). PhantomSniff gates **every attack** behind an explicit typed confirmation, and headless/automated attacks require `--yes`. You are solely responsible for lawful use — pentest your own lab, or engagements you have a signed authorization for.
+
+---
+
+## Features
+
+| Area | Capability |
+|---|---|
+| Recon | Auto monitor-mode (airmon-ng with manual `iw` fallback), network-manager conflict handling, chipset detection (Atheros/Realtek/Ralink/MediaTek), SSID/BSSID/channel/encryption/signal/client-count scanning, WPS detection (`wash` + scapy fallback), target scoring |
+| Attacks | WPA/WPA2 handshake capture (verified EAPOL M1–M4), clientless PMKID (hcxdumptool), WPS Pixie Dust (reaver one-shot), Evil Twin rogue AP + captive portal with **verified** credential harvesting, WEP fakeauth + ARP replay + PTW, targeted/broadcast deauth (aireplay-ng / mdk4) |
+| Cracking | Auto `.cap → 22000` conversion (hcxpcapngtool), GPU auto-detect via `hashcat -I` / `nvidia-smi`, CPU fallback via aircrack-ng, auto rockyou download, best64 rule support, mask/brute-force with `--increment`, live H/s + % + ETA |
+| Performance | Modular lazy loading, `PcapReader` streaming (constant RAM), CSV-polling scanner, CPU+RAM-derived thread pools, headless `--headless` mode, sub-100 MB RAM target |
+| Output | Colored interactive CLI, ASCII banner, Auto Pwn one-click mode, JSON + dependency-free PDF reports, timestamped logs |
+
+---
+
+## Architecture
+
+```
+phantomsniff.py
+├── Log / Color / sh()            logging, colors, subprocess helpers
+├── DependencyManager             auto-check + auto-install (apt/dnf/pacman/pip)
+├── InterfaceManager              detect, chipset ID, monitor up/down, restore
+├── Scanner                       airodump CSV polling + WPS enrichment + scoring
+├── Attack modules (registry)
+│   ├── HandshakeAttack           deauth + verified EAPOL capture
+│   ├── PMKIDAttack               hcxdumptool → hashcat 22000 (clientless)
+│   ├── WPSPixieAttack            reaver -K 1 + pixiewps
+│   ├── EvilTwinAttack            hostapd + dnsmasq + portal (verified)
+│   ├── WEPAttack                 fakeauth + ARP replay + PTW
+│   └── DeauthAttack              targeted / broadcast
+├── CrackEngine                   hashcat GPU/CPU + aircrack fallback, wordlists
+├── MiniPDF / Report              JSON + dependency-free PDF export
+└── PhantomSniff                  menus, Auto Pwn, headless CLI, cleanup
+```
+
+---
+
+## Installation
+
+**Requirements:** Linux (Kali recommended), Python 3.8+, root, a monitor-mode-capable adapter, `pip3 install scapy`.
+
+```bash
+# Kali / Debian / Ubuntu
+sudo apt update
+sudo apt install -y aircrack-ng hashcat hcxtools reaver pixiewps mdk4 \
+                    hostapd dnsmasq iw usbutils
+pip3 install scapy
+
+# Fedora
+sudo dnf install -y aircrack-ng hashcat hcxtools reaver mdk4 hostapd dnsmasq iw
+
+# Or let PhantomSniff do it
+sudo python3 phantomsniff.py --install-deps
+```
+
+Files:
+
+```
+phantomsniff.py      # the entire tool
+requirements.txt     # scapy
+phantomsniff_output/ # created at runtime: caps/ hashes/ attacks/ wordlists/ reports/ logs/
+```
+
+---
+
+## Usage
+
+### Interactive menu (recommended for first runs)
+
+```bash
+sudo python3 phantomsniff.py
+```
+
+Menu: `[A]` Auto Pwn · `[S]` Scan · `[T]` Target + attack · `[C]` Crack · `[R]` Report · `[D]` Dependencies · `[I]` Adapter info · `[Q]` Quit.
+
+### One-click Auto Pwn
+
+```bash
+sudo python3 phantomsniff.py --auto
+# scan → best-scoring target → wps/pmkid/handshake → crack → password + report
+```
+
+### Headless / scripted
+
+```bash
+sudo python3 phantomsniff.py --headless --auto --yes -i wlan0
+sudo python3 phantomsniff.py -a handshake --bssid AA:BB:CC:DD:EE:FF --channel 6 --yes
+sudo python3 phantomsniff.py -a pmkid --bssid AA:BB:.. -w mywordlist.txt --yes
+sudo python3 phantomsniff.py -a eviltwin --bssid AA:BB:.. --et-timeout 600 --yes
+sudo python3 phantomsniff.py -a deauth --bssid AA:BB:.. --client CC:DD:.. --yes
+sudo python3 phantomsniff.py -i wlan0 --scan-only --scan-time 60
+```
+
+### Key CLI flags
+
+| Flag | Purpose |
+|---|---|
+| `-i, --interface` | Wireless adapter to use |
+| `--auto` / `--scan-only` | Full pipeline / recon only |
+| `-a, --attack` | `handshake`, `pmkid`, `wps`, `eviltwin`, `wep`, `deauth` |
+| `--bssid`, `--channel`, `--essid`, `--client` | Target selection |
+| `-w, --wordlist` / `--rule` / `--mask` | Cracking inputs (rockyou auto-downloaded if missing) |
+| `--scan-time`, `--band` | Recon tuning (`abg` covers 2.4 + 5 GHz) |
+| `--hs-timeout`, `--pmkid-timeout`, `--wps-timeout`, `--wep-timeout`, `--et-timeout` | Per-attack timeouts |
+| `--deauth-iface` | Second adapter for ongoing deauth during Evil Twin |
+| `--headless`, `--yes`, `--no-color` | Automation / output control |
+| `--skip-kill`, `--keep-monitor` | Don't kill network managers / leave monitor mode on |
+| `--threads` | Override CPU/RAM-derived pool size |
+
+Full reference: `sudo python3 phantomsniff.py --help`.
+
+---
+
+## Supported Adapters (monitor mode + injection)
+
+| Chipset | Example hardware | USB ID | Monitor | Injection | Notes |
+|---|---|---|---|---|---|
+| Atheros AR9271 | ALFA AWUS036NHA | `0cf3:9271` | ✅ excellent | ✅ | The classic; best all-round choice |
+| Atheros AR9280/92xx | many laptop PCIe cards | (internal) | ✅ | ✅ | Good internal option on older laptops |
+| Realtek RTL8187 | ALFA AWUS036H | `0bda:8187` | ✅ | ✅ | Classic; 2.4 GHz only |
+| Ralink RT3070/RT5372 | ALFA AWUS036NH | `148f:3070` | ✅ | ✅ | Great budget USB pick |
+| Realtek RTL8812AU | ALFA AWUS036ACH | `0bda:8812` | ✅ | ✅ | Dual-band AC; needs `realtek-8812au` driver |
+| Realtek RTL8821CU | various dongles | `0bda:c811` | ✅ | ✅ (patched drv.) | Use `8821cu` monitor-capable driver |
+| MediaTek MT7601 | cheap dongles | `0e8d:7601` | ✅ | ⚠️ partial | Monitor OK, injection unreliable |
+| Intel AX200/AX210 | modern laptops | (internal) | ✅ | ❌ limited | Scan/monitor fine; weak injection |
+
+Chipset is auto-detected from `/sys/class/net/<if>/device/driver` with an `lsusb` fallback (`[I]` in the menu shows it). Avoid modern Intel/Qualcomm laptop cards for injection-heavy attacks.
+
+---
+
+## Low-Resource Operation
+
+- Scanner streams airodump CSVs and parses incrementally; captures are parsed with `scapy.PcapReader` (constant RAM regardless of size).
+- Thread pool = `min(cores, MemAvailable/256MB, 8)` — runs comfortably on a Raspberry Pi 3 (2 GB) or an old C2D laptop.
+- `--headless` skips all menus/banner for minimal overhead.
+- Cracking prefers GPU (`hashcat -I` detection), falls back to hashcat CPU (`--force` added automatically for CPU-only rigs), then to `aircrack-ng` with `-p` sized to the pool.
+- rockyou.txt is auto-located (Kali path, `.gz` decompress) or downloaded once to `phantomsniff_output/wordlists/`.
+
+---
+
+## Reports
+
+Every run persists state to `phantomsniff_output/reports/report_<timestamp>.json` and a matching PDF (rendered by a built-in minimal PDF writer — no reportlab needed). Reports contain: discovered networks (with WPS flags + scores), every attack attempted with status/detail/capture path, and cracked credentials (verified submissions marked as such).
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| "interface not found" | `iw dev` to list names; pass `-i` explicitly |
+| Monitor mode fails | `rfkill unblock wifi`; ensure the chipset supports it; try `--skip-kill` |
+| No handshake after rounds | More clients = better; add `--client <mac>`, increase `--deauth-rounds`; PMKID works with zero clients |
+| hcxpcapngtool finds nothing | Target may reject PMKID; use handshake attack instead |
+| hashcat "no devices" | Install OpenCL runtime (nvidia/cuda or AMD ROCm); CPU rigs still work with `--force` |
+| Evil Twin portal unreachable | Clients need DHCP from dnsmasq — check `attacks/*/dnsmasq.log`; port 443 shows a cert warning (expected) |
+| `Operation not permitted` | Run with `sudo` |
+
+---
+
+## Disclaimer
+
+Provided for education and authorized auditing. The developers accept no liability for misuse. Always get written authorization before testing any network you don't own.
