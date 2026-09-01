@@ -1247,7 +1247,7 @@ def verify_handshake_in_pcap(path: Path, bssid: str, client_mac: Optional[str] =
         Log.warn(f"PcapReader error: {e}")
         return False, "pcap read error"
     if saw_ap and (saw_m2 or saw_m4):
-        return True, f"AP frame M1/M3 + M2/M4 confirmed (M2 from {m2_from or '?')"
+        return True, f"(AP frame M1/M3 + M2/M4 confirmed (M2 from {m2_from or '?')"
     return False, f"AP frames={'yes' if saw_ap else 'no'}, M2/M4={'yes' if saw_m2 or saw_m4 else 'no'}"
 
 
